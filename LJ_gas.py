@@ -72,7 +72,7 @@ class ParticleSystem:
 
 
 class SimulationParameters:
-    def __init__(self, dt, n_steps, temperature, box_length, tau_thermostat = None, rij_min=0.0, ):
+    def __init__(self, dt, n_steps, temperature, box_length, tau_thermostat = None, collision_frequency=None, thermostat="langevin", rij_min=0.0, ):
         """
         Parameters:
             dt (float): Time step in ps.
@@ -90,6 +90,8 @@ class SimulationParameters:
         self.temperature = temperature
         self.box_length = box_length  # in nm
         self.tau_thermostat = tau_thermostat  # thermostat coupling time in ps
+        self.thermostat = thermostat
+        self.collision_frequency = collision_frequency
         self.rij_min = rij_min        # minimum allowed pairwise distance
 
         # Optional: friction coefficient for Langevin or stochastic thermostats
@@ -425,7 +427,52 @@ def O_step(ps: ParticleSystem, sim: SimulationParameters, half_step=False):
  
     ps.velocity = d * ps.velocity + f * ps.random_number 
     
-    return None    
+    return None
+
+def andersen_step(ps: ParticleSystem, sim: SimulationParameters):
+    """
+    Andersen thermostat.
+
+    Each particle collides with the heat bath with probability
+
+        p = collision_frequency * dt
+
+    If a collision occurs, the particle velocity is redrawn from the
+    Maxwell-Boltzmann distribution corresponding to sim.temperature.
+    """
+
+    # collision probability
+    p_collision = sim.collision_frequency * sim.dt
+
+    # safety check
+    if p_collision > 1.0:
+        raise ValueError(
+            "collision_frequency * dt must be <= 1"
+        )
+
+    # determine which particles collide
+    collisions = np.random.random(ps.n) < p_collision
+
+    # masses in kg/mol
+    M = ps.mass * 1e-3
+
+    # Maxwell-Boltzmann standard deviations
+    stddev = np.sqrt(R * sim.temperature / M)
+
+    # draw new velocities for ALL particles
+    new_velocities = np.random.normal(
+        0.0,
+        stddev[:, np.newaxis],
+        size=(ps.n, 3)
+    )
+
+    # convert m/s -> nm/ps
+    new_velocities *= 1e-3
+
+    # replace only colliding particles
+    ps.velocity[collisions] = new_velocities[collisions]
+
+    return None
 
 def simulate_NVE_step(ps: ParticleSystem, sim: SimulationParameters):
     """
@@ -448,6 +495,7 @@ def simulate_NVE_step(ps: ParticleSystem, sim: SimulationParameters):
     Returns:
         None. Updates ps.position, ps.velocity, and ps.force in-place.
     """
+
     B_step(ps, sim, half_step=True)   # update velocity by a half-step
     A_step(ps, sim, half_step=False)  # update position by a full time step
     calculate_force(ps, sim)          # udpate force  
@@ -479,19 +527,28 @@ def simulate_NVT_step(ps: ParticleSystem, sim: SimulationParameters):
         None
     """
     
-    if sim.tau_thermostat is None:
+    if sim.thermostat == "langevin" and sim.tau_thermostat is None:
         raise ValueError("Thermostat coupling time (tau_thermostat) is not set. Cannot run NVT simulation.")
+
+    if sim.thermostat == "andersen" and sim.collision_frequency is None:
+        raise ValueError("Thermostat collision frequency (collision_frequency) is not set. Cannot run NVT simulation.")
+
+    B_step(ps, sim, half_step=True)     # update velocity by a half-step
+    A_step(ps, sim, half_step=True)     # update position by a half-step
     
-    B_step(ps, sim, half_step=True)   # update velocity by a half-step
-    A_step(ps, sim, half_step=True)  # update position by a half-step
     # thermostat
-    O_step(ps, sim, half_step=False)  # Full-step velocity update using the Langevin thermostat (friction + noise)
-    A_step(ps, sim, half_step=True)  # update position by a half-step
-    calculate_force(ps, sim)          # udpate force  
-    B_step(ps, sim, half_step=True)   # update velocity by a second half-step
+    if sim.thermostat == "langevin":
+        O_step(ps, sim)                 # Full-step velocity update using the Langevin thermostat (friction + noise)
+
+    elif sim.thermostat == "andersen":
+        andersen_step(ps, sim)
+
+    A_step(ps, sim, half_step=True)     # update position by a half-step
+    calculate_force(ps, sim)            # udpate force
+    B_step(ps, sim, half_step=True)     # update velocity by a second half-step
 
     apply_periodic_boundary(ps, sim)
-        
+
     return None 
 
 def apply_periodic_boundary(ps: ParticleSystem, sim: SimulationParameters): 

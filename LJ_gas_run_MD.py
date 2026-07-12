@@ -74,13 +74,18 @@ sigma_argon = 0.34              # sigma in nm     Argon: 0.34
 epsilon_argon = 120*R*1e-3      # epsilon in kJ/mol Argon: 120
 
 # simulation
-dt = 0.1             # ps
+dt = 0.1              # ps
 n_steps = 1000 
 temperature = 300     # K
 box_length = 100      # nm
-tau_thermostat = 1  # thermostat coupling constant in 1/ps
+
+# thermostat
+thermostat = "andersen"     # "langevin" or "andersen"
+tau_thermostat = 1.0        # 1/ps (used only for Langevin)
+collision_frequency = 1.0   # 1/ps (used only for andersen)
+
 rij_min = 1e-2      # nm
-NVT = True          # switch to decide between NVT and NVE
+NVT = False         # switch to decide between NVT and NVE
 
 # output
 file_name_base = "my_simulation"  # file name for all output files
@@ -99,6 +104,8 @@ sim = SimulationParameters(dt = dt,
                            temperature = temperature, 
                            box_length = box_length, 
                            tau_thermostat = tau_thermostat,
+                           collision_frequency = collision_frequency,
+                           thermostat = thermostat,
                            rij_min=rij_min
                            )
 
@@ -128,6 +135,7 @@ E_pot_init = potential_energy(ps, sim)
 E_kin_init = kinetic_energy(ps)
 T_init = instantaneous_temperature(ps)
 P_init = ideal_gas_pressure(ps, sim)
+E_tot_init = E_pot_init + E_kin_init
 
 
 # initialize position trajectory
@@ -170,6 +178,10 @@ write_xyz_trajectory(file_name_base + "_pos.xyz", position_trajectory, atom_symb
 np.save(file_name_base + "_ene.npy", energy_trajectory)
 np.savetxt(file_name_base + "_ene.dat", energy_trajectory, fmt="%.6e", header="#E_pot  E_kin  T  P", comments='')
 
+# Total energy trajectory
+E_total = energy_trajectory[:,0] + energy_trajectory[:,1]
+E_tot_mean = np.mean(E_total)
+E_tot_std = np.std(E_total)
 
 #----------------------------------------------------
 # P L O T   E N E R G Y   T R A J E C T O R I E S
@@ -208,6 +220,17 @@ plt.savefig(file_name_base + "_Ekin.png", dpi=300, bbox_inches='tight')
 plt.show()
 
 #
+# total energy
+# 
+plt.figure(figsize=(8,6))
+plt.hist(E_total, bins=40)
+plt.xlabel("Total energy [kJ/mol]")
+plt.ylabel("Counts")
+
+plt.savefig(file_name_base + "_Etot_hist.png", dpi=300)
+plt.show()
+
+#
 # temperature
 # 
 T_min = np.mean(energy_trajectory[:,2]) - 100   # lower limit of T axis
@@ -237,6 +260,17 @@ plt.ylabel("P [Pa]", fontsize=14)
 plt.savefig(file_name_base + "_P.png", dpi=300, bbox_inches='tight')
 plt.show()
 
+# Calculate averages
+avg_E_pot = np.mean(energy_trajectory[:,0])
+avg_E_kin = np.mean(energy_trajectory[:,1])
+avg_T     = np.mean(energy_trajectory[:,2])
+avg_P     = np.mean(energy_trajectory[:,3])
+
+# Calculate standard deviations
+std_E_pot = np.std(energy_trajectory[:,0])
+std_E_kin = np.std(energy_trajectory[:,1])
+std_T     = np.std(energy_trajectory[:,2])
+std_P     = np.std(energy_trajectory[:,3])
 
 #--------------------------------------
 # O U T P U T 
@@ -257,17 +291,49 @@ output_lines.append(f"{'Time step:':<30}{sim.dt:>10.3f} ps")
 output_lines.append(f"{'Number of time steps:':<30}{sim.n_steps:>10.0f}")
 output_lines.append(f"{'Simulation time:':<30}{sim.n_steps * sim.dt :>10.3e} ps")
 output_lines.append("")   
-if NVT==True: 
+if NVT == True:
     output_lines.append(f"{'Ensemble:':<30}{'NVT':>10}")
-    output_lines.append(f"{'Thermostat temperature:':<30}{sim.temperature:>10.0f} K")
-    output_lines.append(f"{'Thermostat coupling:':<30}{sim.tau_thermostat:>10.3e} ps")
-else: 
-    output_lines.append(f"{'Ensemble:':<30}{'NVE':>10}")
-    output_lines.append(f"{'Initial velocities:':<30}{sim.temperature:>10.0f} K")
+    output_lines.append(f"{'Thermostat:':<30}{sim.thermostat:>10}")
+    output_lines.append(f"{'Target temperature:':<30}{sim.temperature:>10.0f} K")
 
-output_lines.append("")     
+    if sim.thermostat == "langevin":
+        output_lines.append(
+            f"{'Coupling time:':<30}{sim.tau_thermostat:>10.3f} ps"
+        )
+
+    elif sim.thermostat == "andersen":
+        output_lines.append(
+            f"{'Collision frequency:':<30}{sim.collision_frequency:>10.3f} 1/ps"
+        )
+
+else:
+    output_lines.append(f"{'Ensemble:':<30}{'NVE':>10}")
+    output_lines.append(f"{'Thermostat:':<30}{'none':>10}")
+    output_lines.append(f"{'Initial temperature:':<30}{sim.temperature:>10.0f} K")
+
+output_lines.append("")
 output_lines.append(f"{'Lower cutoff radius:':<30}{sim.rij_min:>10.3f} nm")
 output_lines.append("----------------------------------------------------------")
+# Averages
+output_lines.append("")
+output_lines.append("Average values")
+output_lines.append("----------------------------------------------------------")
+
+output_lines.append(f"{'Average E_pot:':<30}{avg_E_pot:>10.3f} kJ/mol")
+output_lines.append(f"{'Average E_kin:':<30}{avg_E_kin:>10.3f} kJ/mol")
+output_lines.append(f"{'Average E_tot:':<30}{E_tot_mean:>12.3f} kJ/mol")
+output_lines.append(f"{'Average temperature:':<30}{avg_T:>10.3f} K")
+output_lines.append(f"{'Average pressure:':<30}{avg_P:>10.3f} Pa")
+
+output_lines.append("")
+output_lines.append("Standard deviations")
+output_lines.append("----------------------------------------------------------")
+
+output_lines.append(f"{'Std(E_pot):':<30}{std_E_pot:>10.3f} kJ/mol")
+output_lines.append(f"{'Std(E_kin):':<30}{std_E_kin:>10.3f} kJ/mol")
+output_lines.append(f"{'Std(E_tot):':<30}{E_tot_std:>12.3f} kJ/mol")
+output_lines.append(f"{'Std(T):':<30}{std_T:>10.3f} K")
+output_lines.append(f"{'Std(P):':<30}{std_P:>10.3f} Pa")
 if elapsed_time: 
     time_per_time_step = elapsed_time/sim.n_steps
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
