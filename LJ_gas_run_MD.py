@@ -74,18 +74,19 @@ sigma_argon = 0.34              # sigma in nm     Argon: 0.34
 epsilon_argon = 120*R*1e-3      # epsilon in kJ/mol Argon: 120
 
 # simulation
-dt = 0.1              # ps
+dt = 0.1                      # ps
 n_steps = 1000 
-temperature = 300     # K
-box_length = 100      # nm
+temperature = 300             # K # target temperature of the thermostat
+initial_temperature = 300     # K # initial temperature of the velocities
+box_length = 100              # nm
 
 # thermostat
 thermostat = "andersen"     # "langevin" or "andersen"
-tau_thermostat = 1.0        # 1/ps (used only for Langevin)
+tau_thermostat = 1.0        # ps (used only for Langevin)
 collision_frequency = 1.0   # 1/ps (used only for andersen)
 
 rij_min = 1e-2      # nm
-NVT = False         # switch to decide between NVT and NVE
+NVT = True         # switch to decide between NVT and NVE
 
 # output
 file_name_base = "my_simulation"  # file name for all output files
@@ -122,7 +123,7 @@ for i in range(n_particles):
 initialize_positions(ps, sim.box_length)
 
 # set initial velocities     
-initialize_velocities(ps, sim.temperature)
+initialize_velocities(ps, initial_temperature)
 
 # calculate force according to initial positions
 calculate_force(ps, sim)
@@ -141,6 +142,9 @@ E_tot_init = E_pot_init + E_kin_init
 # initialize position trajectory
 position_trajectory = np.zeros((sim.n_steps+1, n_particles, 3))
 position_trajectory[0,:,:] = ps.position # initial position
+# velocity trajectory
+velocity_trajectory = np.zeros((sim.n_steps + 1, n_particles, 3))
+velocity_trajectory[0,:,:] = ps.velocity
 
 # initialize energy trajectory
 energy_trajectory = np.zeros((sim.n_steps+1, 4))
@@ -161,6 +165,7 @@ for i in range(sim.n_steps):
         
     # store updated positions
     position_trajectory[i+1,:,:] = ps.position # store updated positions
+    velocity_trajectory[i+1,:,:] = ps.velocity
 
     # store updated energies, temperature and pressure
     energy_trajectory[i+1,0] = potential_energy( ps, sim)     # potential energy
@@ -221,9 +226,9 @@ plt.show()
 
 #
 # total energy
-# 
+#
 plt.figure(figsize=(8,6))
-plt.hist(E_total, bins=40)
+plt.hist(E_total, bins=40, edgecolor="black")
 plt.xlabel("Total energy [kJ/mol]")
 plt.ylabel("Counts")
 
@@ -246,6 +251,21 @@ plt.savefig(file_name_base + "_T.png", dpi=300, bbox_inches='tight')
 plt.show()
 
 #
+# temperature where starting temperature is not equal to target temperature
+# 
+# T_min = np.mean(energy_trajectory[:,2]) - 100   # lower limit of T axis
+# T_max = np.mean(energy_trajectory[:,2]) + 210   # upper limit of T axis 
+
+# plt.figure(figsize=(8, 6))
+# plt.plot(time_ps, energy_trajectory[:,2]) 
+# plt.ylim(T_min, T_max)
+# plt.xlabel("time [ps]", fontsize=14)
+# plt.ylabel("T [K]", fontsize=14)
+
+# plt.savefig(file_name_base + "_T-T.png", dpi=300, bbox_inches='tight')
+# plt.show()
+
+#
 # pressure
 # 
 P_min = np.mean(energy_trajectory[:,3]) - 200   # lower limit of P axis
@@ -258,6 +278,97 @@ plt.xlabel("time [ps]", fontsize=14)
 plt.ylabel("P [Pa]", fontsize=14)
 
 plt.savefig(file_name_base + "_P.png", dpi=300, bbox_inches='tight')
+plt.show()
+
+#
+# total speed of particle 0
+# 
+particle = 0
+
+speed = np.linalg.norm(
+    velocity_trajectory[:, particle, :],
+    axis=1
+)
+
+plt.figure(figsize=(8,6))
+plt.plot(time_ps, speed)
+plt.xlabel("time [ps]")
+plt.ylabel("Velocity [nm/ps]")
+plt.title("Particle 0")
+plt.grid()
+
+plt.savefig(file_name_base + "_speed_particle0.png", dpi=300)
+plt.show()
+
+#
+# vx(t) of particle 0
+# 
+particle = 0
+
+plt.figure(figsize=(8,6))
+plt.plot(time_ps,
+         velocity_trajectory[:,particle,0])
+
+plt.xlabel("time [ps]")
+plt.ylabel("v_x [nm/ps]")
+plt.title("Particle 0")
+plt.grid()
+
+plt.savefig(file_name_base + "_vx_particle0.png", dpi=300)
+plt.show()
+
+#
+# x coordinates of particle 0
+# 
+particle = 0
+
+plt.figure(figsize=(8,6))
+plt.plot(time_ps,
+         position_trajectory[:,particle,0])
+
+plt.xlabel("time [ps]")
+plt.ylabel("x position [nm]")
+plt.title("Particle 0")
+plt.grid()
+
+plt.savefig(file_name_base + "_x_particle0.png", dpi=300)
+plt.show()
+
+#
+# xy coordinates of particle 0 (2D)
+# 
+particle = 0
+
+plt.figure(figsize=(6,6))
+plt.plot(position_trajectory[:, particle, 0],
+         position_trajectory[:, particle, 1])
+
+plt.xlabel("x [nm]")
+plt.ylabel("y [nm]")
+plt.axis("equal")
+
+plt.savefig(file_name_base + "_xy_trajectory.png", dpi=300)
+plt.show()
+
+#
+# xyz coordinates of particle 0 (3D)
+# 
+from mpl_toolkits.mplot3d import Axes3D
+
+particle = 0
+
+fig = plt.figure(figsize=(7,7))
+ax = fig.add_subplot(111, projection="3d")
+
+ax.plot(position_trajectory[:, particle, 0],
+        position_trajectory[:, particle, 1],
+        position_trajectory[:, particle, 2])
+
+ax.set_xlabel("x [nm]")
+ax.set_ylabel("y [nm]")
+ax.set_zlabel("z [nm]")
+
+plt.savefig(file_name_base + "_xyz_trajectory.png", dpi=300)
 plt.show()
 
 # Calculate averages
@@ -294,6 +405,7 @@ output_lines.append("")
 if NVT == True:
     output_lines.append(f"{'Ensemble:':<30}{'NVT':>10}")
     output_lines.append(f"{'Thermostat:':<30}{sim.thermostat:>10}")
+    output_lines.append(f"{'Initial temperature:':<30}{initial_temperature:>10.0f} K")
     output_lines.append(f"{'Target temperature:':<30}{sim.temperature:>10.0f} K")
 
     if sim.thermostat == "langevin":

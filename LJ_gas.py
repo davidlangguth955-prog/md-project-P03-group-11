@@ -444,10 +444,15 @@ def andersen_step(ps: ParticleSystem, sim: SimulationParameters):
     # collision probability
     p_collision = sim.collision_frequency * sim.dt
 
-    # safety check
+    # safety checks
     if p_collision > 1.0:
         raise ValueError(
             "collision_frequency * dt must be <= 1"
+        )
+
+    if sim.collision_frequency < 0:
+        raise ValueError(
+            "collision_frequency must be >= 0"
         )
 
     # determine which particles collide
@@ -459,18 +464,20 @@ def andersen_step(ps: ParticleSystem, sim: SimulationParameters):
     # Maxwell-Boltzmann standard deviations
     stddev = np.sqrt(R * sim.temperature / M)
 
-    # draw new velocities for ALL particles
+    # draw new velocities only for colliding particles
+    n_collisions = np.sum(collisions)
+
     new_velocities = np.random.normal(
         0.0,
-        stddev[:, np.newaxis],
-        size=(ps.n, 3)
+        stddev[collisions][:, np.newaxis],
+        size=(n_collisions, 3)
     )
 
     # convert m/s -> nm/ps
     new_velocities *= 1e-3
 
     # replace only colliding particles
-    ps.velocity[collisions] = new_velocities[collisions]
+    ps.velocity[collisions] = new_velocities
 
     return None
 
@@ -507,8 +514,7 @@ def simulate_NVE_step(ps: ParticleSystem, sim: SimulationParameters):
 
 def simulate_NVT_step(ps: ParticleSystem, sim: SimulationParameters):
     """
-    Performs a single time step of molecular dynamics in the NVT ensemble
-    using the BAOAB Langevin integrator.
+    Performs a single MD time step in the NVT ensemble using a BAOAB integrator with either the Langevin or Andersen thermostat.
 
     The steps are:
     1. Half-step velocity update from force (B)
@@ -536,7 +542,7 @@ def simulate_NVT_step(ps: ParticleSystem, sim: SimulationParameters):
     B_step(ps, sim, half_step=True)     # update velocity by a half-step
     A_step(ps, sim, half_step=True)     # update position by a half-step
     
-    # thermostat
+    # Apply the selected thermostat
     if sim.thermostat == "langevin":
         O_step(ps, sim)                 # Full-step velocity update using the Langevin thermostat (friction + noise)
 
