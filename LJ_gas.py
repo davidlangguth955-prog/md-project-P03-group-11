@@ -461,7 +461,7 @@ def andersen_step(ps: ParticleSystem, sim: SimulationParameters):
     # masses in kg/mol
     M = ps.mass * 1e-3
 
-    # Maxwell-Boltzmann standard deviations
+    # Maxwell-Boltzmann standard deviation of each Cartesian velocity component
     stddev = np.sqrt(R * sim.temperature / M)
 
     # draw new velocities only for colliding particles
